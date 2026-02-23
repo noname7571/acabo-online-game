@@ -1,0 +1,9 @@
+{
+  "name": "cabo-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for Cabo Online Game (HTML/CSS/JS)",
+  "main": "index.html",
+  "scripts": {},
+  "author": "noname7571",
+  "license": "MIT"
+}

@@ -1,0 +1,53 @@
+# Ignore build outputs
+**/bin/
+**/obj/
+
+# VS/Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# .NET publish
+publish/
+
+# NuGet packages
+*.nupkg
+packages/
+
+# Rider/IntelliJ
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Node
+node_modules/
+public/node_modules/
+dist/
+build/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+local.settings.json
+
+# Temporary files
+tmp/
+temp/
+
+# Misc
+*.backup
+*.bak

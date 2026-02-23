@@ -1,0 +1,9 @@
+{
+  "name": "CaboGame",
+  "version": "1.0.0",
+  "description": "Real-time multiplayer Cabo card game backend (ASP.NET Core)",
+  "main": "Program.cs",
+  "scripts": {},
+  "author": "noname7571",
+  "license": "MIT"
+}

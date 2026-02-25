@@ -10,16 +10,19 @@ using CaboGame.Game.Models;
 
     public class GameState
     {
-        public string LobbyId { get; set; }
+        public string? LobbyId { get; set; }
         public List<Player> Players { get; set; } = new();
         public List<string> Deck { get; set; } = new();
         public List<string> DiscardPile { get; set; } = new();
         public int CurrentTurn { get; set; }
-        public string Phase { get; set; }
-        public object LastAction { get; set; }
-        public string PendingCard { get; set; }
-        public string PendingPlayerId { get; set; }
+        public string? Phase { get; set; }
+        public object? LastAction { get; set; }
+        public string? PendingCard { get; set; }
+        public string? PendingPlayerId { get; set; }
         public bool GameOver { get; set; }
-        public string Winner { get; set; }
+        public string? Winner { get; set; }
+        // Cabo call state
+        public bool CaboPending { get; set; } = false;
+        public int CaboCountdown { get; set; } = 0;
     }
 }

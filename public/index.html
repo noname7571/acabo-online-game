@@ -15,10 +15,24 @@
             <input type="text" id="lobbyId" placeholder="Lobby ID">
             <button id="joinLobbyBtn">Join Lobby</button>
         </div>
-        <div id="game-section" style="display:none;"></div>
+        <div id="game-section" style="display:none;">
+            <div id="table-container">
+                <div id="player-top" class="seat"></div>
+                <div id="player-left" class="seat"></div>
+                <div id="table-center">
+                    <button id="deckBtn" class="big-btn">Deck</button>
+                    <button id="pileBtn" class="big-btn">Pile</button>
+                </div>
+                <div id="player-right" class="seat"></div>
+                <div id="player-bottom" class="seat"></div>
+            </div>
+            <div id="turn-info"></div>
+            <div id="game-log"></div>
+        </div>
     </div>
-    <script src="js/ws.js"></script>
-    <script src="js/lobby.js"></script>
-    <script src="js/game.js"></script>
+    <!-- cache-busting version query -->
+    <script src="js/ws.js?v=2"></script>
+    <script src="js/lobby.js?v=2"></script>
+    <script src="js/game.js?v=2"></script>
 </body>
 </html>

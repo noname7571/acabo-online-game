@@ -11,7 +11,7 @@ using CaboGame.Game.Models;
 
     public class Lobby
     {
-        public string LobbyId { get; set; }
+        public string LobbyId { get; set; } = string.Empty;
         public List<Player> Players { get; set; } = new();
         public bool GameStarted { get; set; } = false;
     }

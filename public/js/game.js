@@ -281,9 +281,27 @@ function showGame(gameState, result) {
         const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
                          ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
                          : false;
-        const hasPending = window._pendingDraw != null || gameState.pendingPlayerId === window.currentPlayerId || window._takeDiscardMode;
-        pileBtn.disabled = !isMyTurn || hasPending || gameState.phase !== 'draw';
-        pileBtn.onclick = () => { if (!pileBtn.disabled) { window._takeDiscardMode = true; showLog('Click a card to swap with the top of the pile.'); } };
+        // we disable the pile button only if some other pending action is blocking us
+        // or we're already in the take-discard swapping mode.  if we have a pending draw
+        // (_pendingDraw set) we *do* want the button enabled so clicking it discards our
+        // drawn card.
+        const otherPending = ((gameState.pendingPlayerId === window.currentPlayerId) && !window._pendingDraw) || window._takeDiscardMode;
+        pileBtn.disabled = !isMyTurn || otherPending || gameState.phase !== 'draw';
+        pileBtn.onclick = () => {
+            if (!pileBtn.disabled) {
+                if (window._pendingDraw) {
+                    // discard the card we just drew and end our turn
+                    sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } });
+                    window._pendingDraw = null;
+                    showLog('');
+                    showGame(gameState);
+                } else {
+                    // normal take-discard flow
+                    window._takeDiscardMode = true;
+                    showLog('Click a card to swap with the top of the pile.');
+                }
+            }
+        };
     }
 
     // pending draw resolution
@@ -295,7 +313,13 @@ function showGame(gameState, result) {
             const panel = document.createElement('div'); panel.style.marginTop = '8px'; panel.innerHTML = `You drew: <b>${window._pendingDraw}</b>`;
             const discardBtn = document.createElement('button'); discardBtn.className = 'card-btn'; discardBtn.textContent = 'Discard';
             discardBtn.onclick = () => { sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } }); window._pendingDraw = null; showLog(''); showGame(gameState); };
-            panel.appendChild(discardBtn); log.appendChild(panel);
+            panel.appendChild(discardBtn);
+            const info = document.createElement('div');
+            info.style.fontSize = '0.9em';
+            info.style.marginTop = '4px';
+            info.textContent = 'Or click the pile to discard and end your turn.';
+            panel.appendChild(info);
+            log.appendChild(panel);
         }
     }
 }

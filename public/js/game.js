@@ -214,10 +214,10 @@ function showGame(gameState, result) {
 
             const cabo = document.createElement('button'); cabo.className = 'big-btn'; cabo.textContent = 'Call Cabo';
             cabo.onclick = () => sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'call_cabo' });
-            // enable only when it's your turn
+            // enable only when it's your turn and you're not sitting on a drawn card
             const currentPlayerId = gameState.players && gameState.players[gameState.currentTurn] ? gameState.players[gameState.currentTurn].id : null;
             const isMyTurn = (currentPlayerId === window.currentPlayerId);
-            cabo.disabled = !isMyTurn;
+            cabo.disabled = !isMyTurn || !!window._pendingDraw;
             // if there is a pending draw, show pair-claim option
             if (window._pendingDraw) {
                 const pairBtn = document.createElement('button'); pairBtn.className = 'card-btn'; pairBtn.textContent = 'Pair Claim';
@@ -236,7 +236,7 @@ function showGame(gameState, result) {
         }
 
         if (container) container.appendChild(seatDiv);
-        // if game over show totals under seat
+        // only reveal totals after the game ends
         if (gameState.gameOver && gameState.totals) {
             const total = gameState.totals[p.id] ?? 0;
             const totalDiv = document.createElement('div');
@@ -250,58 +250,64 @@ function showGame(gameState, result) {
     const pileBtn = document.getElementById('pileBtn');
     // show deck count and top of pile; enable buttons to be clickable for testing
     if (deckBtn) {
-        deckBtn.textContent = `Deck (${(gameState.deck||[]).length})`;
-        // disable if it's not our turn, or we've already drawn/there's a pending card
-        const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
-                         ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
-                         : false;
-        const hasPending = window._pendingDraw != null || gameState.pendingPlayerId === window.currentPlayerId || window._takeDiscardMode;
-        deckBtn.disabled = !isMyTurn || hasPending || gameState.phase !== 'draw';
-        // update pending display (covers this and pile area too)
-        const pendingDiv = document.getElementById('pending-card');
-        if (pendingDiv) {
-            if (gameState.pendingPlayerId) {
-                pendingDiv.style.display = 'block';
-                if (gameState.pendingPlayerId === window.currentPlayerId) {
-                    pendingDiv.textContent = gameState.pendingCard || window._pendingDraw || '';
+        if (gameState.gameOver) {
+            deckBtn.style.display = 'none';
+        } else {
+            deckBtn.style.display = '';
+            deckBtn.textContent = `Deck (${(gameState.deck||[]).length})`;
+            // disable if it's not our turn, or we've already drawn/there's a pending card
+            const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
+                             ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
+                             : false;
+            const hasPending = window._pendingDraw != null || gameState.pendingPlayerId === window.currentPlayerId || window._takeDiscardMode;
+            deckBtn.disabled = !isMyTurn || hasPending || gameState.phase !== 'draw';
+            // update pending display (covers this and pile area too)
+            const pendingDiv = document.getElementById('pending-card');
+            if (pendingDiv) {
+                if (gameState.pendingPlayerId) {
+                    pendingDiv.style.display = 'block';
+                    if (gameState.pendingPlayerId === window.currentPlayerId) {
+                        pendingDiv.textContent = gameState.pendingCard || window._pendingDraw || '';
+                    } else {
+                        pendingDiv.textContent = '?';
+                    }
                 } else {
-                    pendingDiv.textContent = '?';
+                    pendingDiv.style.display = 'none';
                 }
-            } else {
-                pendingDiv.style.display = 'none';
             }
+            deckBtn.onclick = () => {
+                if (!deckBtn.disabled) sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'draw' });
+            };
         }
-        deckBtn.onclick = () => {
-            if (!deckBtn.disabled) sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'draw' });
-        };
     }
     if (pileBtn) {
-        const top = (gameState.discardPile && gameState.discardPile.length>0) ? gameState.discardPile[gameState.discardPile.length-1] : 'Empty';
-        pileBtn.textContent = `Pile (${top})`;
-        const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
-                         ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
-                         : false;
-        // we disable the pile button only if some other pending action is blocking us
-        // or we're already in the take-discard swapping mode.  if we have a pending draw
-        // (_pendingDraw set) we *do* want the button enabled so clicking it discards our
-        // drawn card.
-        const otherPending = ((gameState.pendingPlayerId === window.currentPlayerId) && !window._pendingDraw) || window._takeDiscardMode;
-        pileBtn.disabled = !isMyTurn || otherPending || gameState.phase !== 'draw';
-        pileBtn.onclick = () => {
-            if (!pileBtn.disabled) {
-                if (window._pendingDraw) {
-                    // discard the card we just drew and end our turn
-                    sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } });
-                    window._pendingDraw = null;
-                    showLog('');
-                    showGame(gameState);
-                } else {
-                    // normal take-discard flow
-                    window._takeDiscardMode = true;
-                    showLog('Click a card to swap with the top of the pile.');
+        if (gameState.gameOver) {
+            pileBtn.style.display = 'none';
+        } else {
+            pileBtn.style.display = '';
+            const top = (gameState.discardPile && gameState.discardPile.length>0) ? gameState.discardPile[gameState.discardPile.length-1] : 'Empty';
+            pileBtn.textContent = `Pile (${top})`;
+            const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
+                             ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
+                             : false;
+            const otherPending = ((gameState.pendingPlayerId === window.currentPlayerId) && !window._pendingDraw) || window._takeDiscardMode;
+            pileBtn.disabled = !isMyTurn || otherPending || gameState.phase !== 'draw';
+            pileBtn.onclick = () => {
+                if (!pileBtn.disabled) {
+                    if (window._pendingDraw) {
+                        // discard the card we just drew and end our turn
+                        sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } });
+                        window._pendingDraw = null;
+                        showLog('');
+                        showGame(gameState);
+                    } else {
+                        // normal take-discard flow
+                        window._takeDiscardMode = true;
+                        showLog('Click a card to swap with the top of the pile.');
+                    }
                 }
-            }
-        };
+            };
+        }
     }
 
     // pending draw resolution
@@ -320,6 +326,18 @@ function showGame(gameState, result) {
             info.textContent = 'Or click the pile to discard and end your turn.';
             panel.appendChild(info);
             log.appendChild(panel);
+        }
+    }
+    // when the game ends, hide action buttons and offer replay
+    if (gameState.gameOver) {
+        const controls = document.getElementById('center-controls');
+        if (controls) {
+            controls.innerHTML = '';
+            const replay = document.createElement('button');
+            replay.className = 'big-btn';
+            replay.textContent = 'Play Again';
+            replay.onclick = () => { window.location.reload(); };
+            controls.appendChild(replay);
         }
     }
 }

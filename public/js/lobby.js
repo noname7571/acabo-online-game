@@ -69,6 +69,12 @@ function handleWSMessage(msg) {
         if (msg.selfPlayerId) { currentPlayerId = msg.selfPlayerId; window.currentPlayerId = msg.selfPlayerId; }
         window._timerEnabled = msg.timerEnabled;
         window._turnSeconds = msg.turnSeconds;
+        // retain a drawn card until it is resolved; only clear pending when state no longer shows us as the pending player
+        if (msg.gameState) {
+            if (msg.gameState.pendingPlayerId !== window.currentPlayerId) {
+                window._pendingDraw = null;
+            }
+        }
         showGame(msg.gameState, msg.result);
     } else if (msg.type === 'peek_result') {
         // temporarily reveal local card (initial peek) without logging text

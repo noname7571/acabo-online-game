@@ -24,5 +24,7 @@ using CaboGame.Game.Models;
         // Cabo call state
         public bool CaboPending { get; set; } = false;
         public int CaboCountdown { get; set; } = 0;
+        public string? CaboCalledBy { get; set; } = null; // set when a player requests Cabo during their turn
+        public Dictionary<string,int> Totals { get; set; } = new(); // card sums at end of game
     }
 }

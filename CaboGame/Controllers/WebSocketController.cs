@@ -72,8 +72,9 @@ namespace CaboGame.Controllers
                                     var playerName = root.GetProperty("playerName").GetString() ?? string.Empty;
                                 var lobbyId = Guid.NewGuid().ToString().Substring(0, 6);
                                 var player = new Player { Id = playerId, Name = playerName };
-                                var lobby = new Lobby { LobbyId = lobbyId };
-                                lobby.Players.Add(player);
+                                var lobby = new Lobby { LobbyId = lobbyId };                                // read optional timer settings
+                                if (root.TryGetProperty("timerEnabled", out var te)) lobby.TimerEnabled = te.GetBoolean();
+                                if (root.TryGetProperty("turnSeconds", out var ts)) lobby.TurnSeconds = ts.GetInt32();                                lobby.Players.Add(player);
                                 _lobbyManager.Lobbies[lobbyId] = lobby;
                                 lock (_lock) _connections[playerId] = webSocket;
                                 await SendLobbyUpdate(lobby);
@@ -145,6 +146,18 @@ namespace CaboGame.Controllers
 
                                 switch (actionType)
                                 {
+                                    case "update_settings":
+                                    {
+                                        var timerEnabled = payload.GetProperty("timerEnabled").GetBoolean();
+                                        var turnSeconds = payload.GetProperty("turnSeconds").GetInt32();
+                                        if (_lobbyManager.Lobbies.TryGetValue(actionLobbyId, out var lo))
+                                        {
+                                            lo.TimerEnabled = timerEnabled;
+                                            lo.TurnSeconds = turnSeconds;
+                                            await SendLobbyUpdate(lo);
+                                        }
+                                        break;
+                                    }
                                     case "skip_turn":
                                     {
                                         // only skip on your turn
@@ -172,6 +185,12 @@ namespace CaboGame.Controllers
                                     case "draw":
                                     {
                                         if (actionGame.Phase != "draw" || actionGame.CurrentTurn != playerIdx) break;
+                                        // don't allow a second draw while previous draw is pending
+                                        if (actionGame.PendingCard != null)
+                                        {
+                                            await SendError(webSocket, "You already drew a card");
+                                            break;
+                                        }
                                         if (actionGame.Deck.Count == 0) { await SendError(webSocket, "Deck is empty"); break; }
                                         var card = actionGame.Deck[0];
                                         actionGame.Deck.RemoveAt(0);
@@ -198,22 +217,18 @@ namespace CaboGame.Controllers
                                             actionGame.LastAction = new { type = "discard", player = actingPlayer.Id, card = drawn ?? string.Empty };
                                             actionGame.Phase = "draw";
                                             actionGame.CurrentTurn = (actionGame.CurrentTurn + 1) % actionGame.Players.Count;
+                                            PostAdvance(actionGame);
                                         }
                                         else if (action == "swap")
                                         {
                                             int cardIdx = payload.GetProperty("cardIndex").GetInt32();
                                             var replaced = actingPlayer.Hand[cardIdx];
                                             actingPlayer.Hand[cardIdx] = drawn ?? string.Empty;
-                                            // do not discard replaced yet; make it the new pending card so player can choose again
-                                            actionGame.PendingCard = replaced;
-                                            actionGame.PendingPlayerId = actingPlayer.Id;
+                                            // discard the replaced card
+                                            actionGame.DiscardPile.Add(replaced ?? string.Empty);
                                             actionGame.LastAction = new { type = "swap", player = actingPlayer.Id, card = drawn ?? string.Empty };
-                                            // replay draw offer with the replaced card
-                                            if (_connections.TryGetValue(actingPlayer.Id, out var replayWs) && replayWs.State == WebSocketState.Open)
-                                            {
-                                                await SendJson(replayWs, new { type = "draw_offer", card = replaced });
-                                            }
-                                            // keep phase "draw" and current turn unchanged
+                                            actionGame.Phase = "draw";
+                                            actionGame.CurrentTurn = (actionGame.CurrentTurn + 1) % actionGame.Players.Count;
                                         }
                                         else if (action == "pair_claim")
                                         {
@@ -321,6 +336,7 @@ namespace CaboGame.Controllers
                                                     var totals = actionGame.Players.Select(pl => new { id = pl.Id, total = pl.Hand.Sum(h => int.TryParse(h, out var v) ? v : 0) }).ToList();
                                                     var winner = totals.OrderBy(t => t.total).First();
                                                     actionGame.Winner = winner.id;
+                                                    actionGame.Totals = totals.ToDictionary(t=>t.id,t=>t.total);
                                                     await SendGameUpdate(actionGame, "Final scoring: " + string.Join(", ", totals.Select(t => t.id + ":" + t.total)));
                                                     break;
                                                 }
@@ -336,6 +352,7 @@ namespace CaboGame.Controllers
                                                 var totals = actionGame.Players.Select(pl => new { id = pl.Id, total = pl.Hand.Sum(h => int.TryParse(h, out var v) ? v : 0) }).ToList();
                                                 var winner = totals.OrderBy(t => t.total).First();
                                                 actionGame.Winner = winner.id;
+                                                actionGame.Totals = totals.ToDictionary(t=>t.id,t=>t.total);
                                                 await SendGameUpdate(actionGame, "Final scoring: " + string.Join(", ", totals.Select(t => t.id + ":" + t.total)));
                                                 break;
                                             }
@@ -345,6 +362,8 @@ namespace CaboGame.Controllers
                                     }
                                     case "take_discard":
                                     {
+                                        // can't take discard if there's a pending draw
+                                        if (actionGame.PendingCard != null && actionGame.PendingPlayerId == actingPlayer.Id) { await SendError(webSocket, "Resolve your drawn card first"); break; }
                                         if (actionGame.DiscardPile.Count == 0) { await SendError(webSocket, "Discard empty"); break; }
                                         int cardIdx = payload.GetProperty("cardIndex").GetInt32();
                                         var top = actionGame.DiscardPile.Last();
@@ -356,17 +375,12 @@ namespace CaboGame.Controllers
                                         {
                                             actingPlayer.Revealed[cardIdx] = true;
                                         }
-                                        // make replaced card pending to allow swap back
-                                        actionGame.PendingCard = replaced;
-                                        actionGame.PendingPlayerId = actingPlayer.Id;
+                                        // discard replaced immediately
                                         actionGame.DiscardPile.Add(replaced ?? string.Empty);
                                         actionGame.LastAction = new { type = "take_discard", player = actingPlayer.Id, card = top ?? string.Empty, cardIndex = cardIdx };
-                                        // replay draw offer
-                                        if (_connections.TryGetValue(actingPlayer.Id, out var replayWs2) && replayWs2.State == WebSocketState.Open)
-                                        {
-                                            await SendJson(replayWs2, new { type = "draw_offer", card = replaced });
-                                        }
-                                        // keep turn same (still drawing phase)
+                                        actionGame.Phase = "draw";
+                                        actionGame.CurrentTurn = (actionGame.CurrentTurn + 1) % actionGame.Players.Count;
+                                        PostAdvance(actionGame);
                                         if (actionGame.CaboPending)
                                         {
                                             actionGame.CaboCountdown -= 1;
@@ -387,12 +401,10 @@ namespace CaboGame.Controllers
                                     {
                                         // only allow calling Cabo on your turn
                                         if (actionGame.CurrentTurn != playerIdx) { await SendError(webSocket, "You can only call Cabo on your turn"); break; }
-                                        actionGame.CaboPending = true;
-                                        actionGame.CaboCountdown = actionGame.Players.Count - 1; // others get one more turn each
-                                        actionGame.LastAction = new { type = "call_cabo", player = actingPlayer.Id };
-                                        // advance to next player
-                                        actionGame.CurrentTurn = (actionGame.CurrentTurn + 1) % actionGame.Players.Count;
-                                        await SendGameUpdate(actionGame, "Cabo called by " + actingPlayer.Id);
+                                        // mark request; actual countdown will occur after this player's action completes
+                                        actionGame.CaboCalledBy = actingPlayer.Id;
+                                        actionGame.LastAction = new { type = "call_cabo_requested", player = actingPlayer.Id };
+                                        await SendGameUpdate(actionGame, "Cabo will be called by " + actingPlayer.Id + " at end of turn");
                                         break;
                                     }
                                 }
@@ -424,6 +436,18 @@ namespace CaboGame.Controllers
             }
         }
 
+        // called after turn-advancing actions to start cabo countdown if requested
+        private void PostAdvance(GameState gameState)
+        {
+            if (!string.IsNullOrEmpty(gameState.CaboCalledBy))
+            {
+                gameState.CaboPending = true;
+                gameState.CaboCountdown = gameState.Players.Count - 1;
+                gameState.LastAction = new { type = "cabo_called", player = gameState.CaboCalledBy };
+                gameState.CaboCalledBy = null;
+            }
+        }
+
         private async Task SendLobbyUpdate(Lobby lobby)
         {
             var playersList = lobby.Players.Select(p => new { id = p.Id, name = p.Name }).ToList();
@@ -436,6 +460,8 @@ namespace CaboGame.Controllers
                         type = "lobby_update",
                         lobbyId = lobby.LobbyId,
                         players = playersList,
+                        timerEnabled = lobby.TimerEnabled,
+                        turnSeconds = lobby.TurnSeconds,
                         selfPlayerId = player.Id
                     };
                     await SendJson(ws, msg);
@@ -449,6 +475,8 @@ namespace CaboGame.Controllers
 
         private async Task SendGameStart(GameState gameState)
         {
+            Lobby? lobby = null;
+            if (gameState.LobbyId != null && _lobbyManager.Lobbies.TryGetValue(gameState.LobbyId, out var lb)) lobby = lb;
             var playersDto = gameState.Players.Select(p => new { id = p.Id, name = p.Name, hand = p.Hand, revealed = p.Revealed, initialPeeksRemaining = p.InitialPeeksRemaining }).ToList();
             foreach (var player in gameState.Players)
             {
@@ -458,6 +486,8 @@ namespace CaboGame.Controllers
                     {
                         type = "game_start",
                         lobbyId = gameState.LobbyId,
+                        timerEnabled = lobby?.TimerEnabled ?? false,
+                        turnSeconds = lobby?.TurnSeconds ?? 15,
                         gameState = new
                         {
                             lobbyId = gameState.LobbyId,
@@ -467,7 +497,10 @@ namespace CaboGame.Controllers
                             currentTurn = gameState.CurrentTurn,
                             phase = gameState.Phase,
                             gameOver = gameState.GameOver,
-                            winner = gameState.Winner
+                            winner = gameState.Winner,
+                            totals = gameState.Totals,
+                            pendingPlayerId = gameState.PendingPlayerId,
+                            pendingCard = gameState.PendingCard
                         },
                         selfPlayerId = player.Id
                     };
@@ -478,6 +511,8 @@ namespace CaboGame.Controllers
 
         private async Task SendGameUpdate(GameState gameState, string? result)
         {
+            Lobby? lobby = null;
+            if (gameState.LobbyId != null && _lobbyManager.Lobbies.TryGetValue(gameState.LobbyId, out var lb)) lobby = lb;
             var playersDto = gameState.Players.Select(p => new { id = p.Id, name = p.Name, hand = p.Hand, revealed = p.Revealed, initialPeeksRemaining = p.InitialPeeksRemaining }).ToList();
             foreach (var player in gameState.Players)
             {
@@ -487,6 +522,8 @@ namespace CaboGame.Controllers
                     {
                         type = "game_update",
                         lobbyId = gameState.LobbyId,
+                        timerEnabled = lobby?.TimerEnabled ?? false,
+                        turnSeconds = lobby?.TurnSeconds ?? 15,
                         gameState = new
                         {
                             lobbyId = gameState.LobbyId,
@@ -496,7 +533,10 @@ namespace CaboGame.Controllers
                             currentTurn = gameState.CurrentTurn,
                             phase = gameState.Phase,
                             gameOver = gameState.GameOver,
-                            winner = gameState.Winner
+                            winner = gameState.Winner,
+                            totals = gameState.Totals,
+                            pendingPlayerId = gameState.PendingPlayerId,
+                            pendingCard = gameState.PendingCard
                         },
                         result,
                         selfPlayerId = player.Id

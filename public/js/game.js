@@ -10,12 +10,23 @@ function updateTurnInfo(gameState) {
         text = (current === window.currentPlayerId) ? 'Your turn' : `Player ${gameState.currentTurn + 1}'s turn`;
     }
     turnDiv.textContent = text;
+    turnDiv.style.opacity = 1;
     startTurnTimer(current === window.currentPlayerId);
+    // clear turn-info after 2 seconds with fade
+    clearTimeout(window._turnInfoClearTimer);
+    window._turnInfoClearTimer = setTimeout(() => {
+        if (turnDiv) {
+            turnDiv.style.opacity = 0;
+            setTimeout(() => { if(turnDiv) turnDiv.textContent = ''; }, 500);
+        }
+    }, 2000);
 }
 
 function startTurnTimer(isMine) {
     clearInterval(window._turnTimer);
-    window._turnCountdown = 15;
+    const seconds = (window._timerEnabled===false) ? 0 : (window._turnSeconds || 15);
+    window._turnCountdown = seconds;
+    if (seconds <= 0) return; // no timer
     const turnDiv = document.getElementById('turn-info');
     if (!turnDiv) return;
     window._turnTimer = setInterval(() => {
@@ -46,13 +57,13 @@ function renderPairUI() {
         sendWSMessage({ type: 'player_action', lobbyId: window._lastGameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'pair_claim', indices: window._pairSelected } });
         window._pairClaimMode = false;
         window._pairSelected = [];
-        log.textContent = '';
+        showLog('');
     };
     log.appendChild(confirm);
     const cancel = document.createElement('button');
     cancel.className = 'card-btn';
     cancel.textContent = 'Cancel';
-    cancel.onclick = () => { window._pairClaimMode = false; window._pairSelected = []; log.textContent = ''; };
+    cancel.onclick = () => { window._pairClaimMode = false; window._pairSelected = []; showLog(''); };
     log.appendChild(cancel);
     window._pairConfirmBtn = confirm;
 }
@@ -68,6 +79,21 @@ function revealTemp(playerId, idx) {
             delete window._tempReveals[playerId][idx];
         }
         showGame(window._lastGameState || {});
+    }, 2000);
+}
+
+// helper to display a short message in game-log and clear it after 2 seconds
+function showLog(msg) {
+    const log = document.getElementById('game-log');
+    if (!log) return;
+    log.textContent = msg;
+    log.style.opacity = 1;
+    clearTimeout(window._logClearTimer);
+    window._logClearTimer = setTimeout(() => {
+        if (log) {
+            log.style.opacity = 0;
+            setTimeout(() => { if(log) log.textContent = ''; }, 500);
+        }
     }, 2000);
 }
 
@@ -122,6 +148,8 @@ function showGame(gameState, result) {
         const handDiv = document.createElement('div');
         handDiv.style.display = 'flex';
         handDiv.style.gap = '8px';
+        // if game over, reveal entire hand
+        const revealAll = gameState.gameOver === true;
         const handSize = (p.hand && p.hand.length) ? p.hand.length : 0;
         for (let idx = 0; idx < handSize; idx++) {
             const val = (p.hand && p.hand[idx] != null) ? p.hand[idx] : null;
@@ -129,9 +157,9 @@ function showGame(gameState, result) {
             const btn = document.createElement('button');
             btn.className = 'card-btn';
             btn.dataset.idx = idx;
-            // show value only if permanently revealed or temporarily exposed by a peek
+            // show value only if permanently revealed, temporarily exposed by a peek, or game over
             let visible = false;
-            if (revealed) visible = true;
+            if (revealed || revealAll || gameState.gameOver) visible = true;
             if (window._tempReveals && window._tempReveals[p.id] && window._tempReveals[p.id][idx]) visible = true;
             btn.textContent = visible ? (val != null ? String(val) : '_') : '?';
             if (seat === 'bottom') {
@@ -151,11 +179,14 @@ function showGame(gameState, result) {
                     }
                     if (window._pendingDraw) {
                         sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'swap', cardIndex: idx } });
-                        window._pendingDraw = null; return;
+                        window._pendingDraw = null;
+                        // clear any pending-draw message from the info log
+                        showLog('');
+                        return;
                     }
                     if (window._takeDiscardMode) {
                         sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'take_discard', payload: { cardIndex: idx } });
-                        window._takeDiscardMode = false; const log = document.getElementById('game-log'); if (log) log.textContent = ''; return;
+                        window._takeDiscardMode = false; showLog(''); return;
                     }
                 };
             }
@@ -205,6 +236,13 @@ function showGame(gameState, result) {
         }
 
         if (container) container.appendChild(seatDiv);
+        // if game over show totals under seat
+        if (gameState.gameOver && gameState.totals) {
+            const total = gameState.totals[p.id] ?? 0;
+            const totalDiv = document.createElement('div');
+            totalDiv.textContent = `Total: ${total}`;
+            seatDiv.appendChild(totalDiv);
+        }
     }
 
     // center controls
@@ -213,23 +251,75 @@ function showGame(gameState, result) {
     // show deck count and top of pile; enable buttons to be clickable for testing
     if (deckBtn) {
         deckBtn.textContent = `Deck (${(gameState.deck||[]).length})`;
-        deckBtn.disabled = false;
-        deckBtn.onclick = () => sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'draw' });
+        // disable if it's not our turn, or we've already drawn/there's a pending card
+        const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
+                         ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
+                         : false;
+        const hasPending = window._pendingDraw != null || gameState.pendingPlayerId === window.currentPlayerId || window._takeDiscardMode;
+        deckBtn.disabled = !isMyTurn || hasPending || gameState.phase !== 'draw';
+        // update pending display (covers this and pile area too)
+        const pendingDiv = document.getElementById('pending-card');
+        if (pendingDiv) {
+            if (gameState.pendingPlayerId) {
+                pendingDiv.style.display = 'block';
+                if (gameState.pendingPlayerId === window.currentPlayerId) {
+                    pendingDiv.textContent = gameState.pendingCard || window._pendingDraw || '';
+                } else {
+                    pendingDiv.textContent = '?';
+                }
+            } else {
+                pendingDiv.style.display = 'none';
+            }
+        }
+        deckBtn.onclick = () => {
+            if (!deckBtn.disabled) sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'draw' });
+        };
     }
     if (pileBtn) {
         const top = (gameState.discardPile && gameState.discardPile.length>0) ? gameState.discardPile[gameState.discardPile.length-1] : 'Empty';
         pileBtn.textContent = `Pile (${top})`;
-        pileBtn.disabled = false;
-        pileBtn.onclick = () => { window._takeDiscardMode = true; const log = document.getElementById('game-log'); if (log) log.textContent = 'Click a card to swap with the top of the pile.'; };
+        const isMyTurn = gameState.players && gameState.players[gameState.currentTurn]
+                         ? gameState.players[gameState.currentTurn].id === window.currentPlayerId
+                         : false;
+        // we disable the pile button only if some other pending action is blocking us
+        // or we're already in the take-discard swapping mode.  if we have a pending draw
+        // (_pendingDraw set) we *do* want the button enabled so clicking it discards our
+        // drawn card.
+        const otherPending = ((gameState.pendingPlayerId === window.currentPlayerId) && !window._pendingDraw) || window._takeDiscardMode;
+        pileBtn.disabled = !isMyTurn || otherPending || gameState.phase !== 'draw';
+        pileBtn.onclick = () => {
+            if (!pileBtn.disabled) {
+                if (window._pendingDraw) {
+                    // discard the card we just drew and end our turn
+                    sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } });
+                    window._pendingDraw = null;
+                    showLog('');
+                    showGame(gameState);
+                } else {
+                    // normal take-discard flow
+                    window._takeDiscardMode = true;
+                    showLog('Click a card to swap with the top of the pile.');
+                }
+            }
+        };
     }
 
     // pending draw resolution
-    const log = document.getElementById('game-log'); if (result && log) log.textContent = result;
-    if (window._pendingDraw && log) {
-        log.innerHTML = '';
-        const panel = document.createElement('div'); panel.style.marginTop = '8px'; panel.innerHTML = `You drew: <b>${window._pendingDraw}</b>`;
-        const discardBtn = document.createElement('button'); discardBtn.className = 'card-btn'; discardBtn.textContent = 'Discard';
-        discardBtn.onclick = () => { sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } }); window._pendingDraw = null; log.textContent = ''; showGame(gameState); };
-        panel.appendChild(discardBtn); log.appendChild(panel);
+    if (result) showLog(result);
+    if (window._pendingDraw) {
+        const log = document.getElementById('game-log');
+        if (log) {
+            log.innerHTML = '';
+            const panel = document.createElement('div'); panel.style.marginTop = '8px'; panel.innerHTML = `You drew: <b>${window._pendingDraw}</b>`;
+            const discardBtn = document.createElement('button'); discardBtn.className = 'card-btn'; discardBtn.textContent = 'Discard';
+            discardBtn.onclick = () => { sendWSMessage({ type: 'player_action', lobbyId: gameState.lobbyId, actionType: 'resolve_draw', payload: { action: 'discard' } }); window._pendingDraw = null; showLog(''); showGame(gameState); };
+            panel.appendChild(discardBtn);
+            const info = document.createElement('div');
+            info.style.fontSize = '0.9em';
+            info.style.marginTop = '4px';
+            info.textContent = 'Or click the pile to discard and end your turn.';
+            panel.appendChild(info);
+            log.appendChild(panel);
+        }
     }
 }

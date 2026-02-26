@@ -14,5 +14,8 @@ using CaboGame.Game.Models;
         public string LobbyId { get; set; } = string.Empty;
         public List<Player> Players { get; set; } = new();
         public bool GameStarted { get; set; } = false;
+        // per-lobby turn timer configuration
+        public bool TimerEnabled { get; set; } = true;
+        public int TurnSeconds { get; set; } = 15;
     }
 }

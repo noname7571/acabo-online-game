@@ -4,11 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cabo Online Game</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body>
     <div id="main">
-        <h1>Cabo Online Game</h1>
         <div id="lobby-section">
             <input type="text" id="playerName" placeholder="Enter your name">
             <button id="createLobbyBtn">Create Lobby</button>
@@ -23,16 +22,18 @@
                     <button id="deckBtn" class="big-btn">Deck</button>
                     <button id="pileBtn" class="big-btn">Pile</button>
                 </div>
+                <div id="pending-card"></div>
                 <div id="player-right" class="seat"></div>
                 <div id="player-bottom" class="seat"></div>
+                <!-- game info now inside table -->
+                <div id="turn-info" class="overlay"></div>
+                <div id="game-log" class="overlay"></div>
             </div>
-            <div id="turn-info"></div>
-            <div id="game-log"></div>
         </div>
     </div>
     <!-- cache-busting version query -->
-    <script src="js/ws.js?v=2"></script>
-    <script src="js/lobby.js?v=2"></script>
-    <script src="js/game.js?v=2"></script>
+    <script src="js/ws.js?v=4"></script>
+    <script src="js/lobby.js?v=4"></script>
+    <script src="js/game.js?v=4"></script>
 </body>
 </html>
